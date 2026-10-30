@@ -36,10 +36,13 @@ except Exception as error:
 	IMPORT_ERROR = error
 
 
-def _safe_message(message: str) -> str:
+def _safe_message(message: str, additional_secrets: tuple[str, ...] = ()) -> str:
 	"""Redact configured credentials before any exception is shown in the UI."""
 	for variable_name in ("LLM_API_KEY", "OPENAI_API_KEY"):
 		secret = os.getenv(variable_name)
+		if secret:
+			additional_secrets += (secret,)
+	for secret in additional_secrets:
 		if secret:
 			message = message.replace(secret, "[redacted]")
 	return message
@@ -163,6 +166,41 @@ criteria, database_path, criteria_error = _load_criteria()
 st.title("Agentic RFP Evaluation")
 st.caption("Evidence-led proposal review with deterministic scoring and supplier ranking.")
 
+with st.sidebar:
+	st.header("LLM settings")
+	llm_provider = st.selectbox(
+		"Provider",
+		options=["openai", "openai-compatible"],
+		format_func=lambda provider: (
+			"OpenAI" if provider == "openai" else "OpenAI-compatible endpoint"
+		),
+		key="llm_provider",
+	)
+	llm_api_key = st.text_input(
+		"API key",
+		type="password",
+		key="llm_api_key",
+		help="Used for this Streamlit session; it is not saved with evaluation results.",
+	)
+	llm_model = st.text_input(
+		"Model",
+		value="gpt-4o-mini",
+		key="llm_model",
+		help="Enter a model supported by your selected provider.",
+	)
+	llm_base_url = ""
+	if llm_provider == "openai-compatible":
+		llm_base_url = st.text_input(
+			"Base URL",
+			placeholder="https://your-provider.example/v1",
+			key="llm_base_url",
+			help="OpenAI-compatible API endpoint, including the /v1 path if required.",
+		)
+	st.caption(
+		"Credentials are used only when you start an evaluation. "
+		"Leave the API key blank to use LLM_API_KEY or OPENAI_API_KEY from the environment."
+	)
+
 st.header("1. Criteria")
 if criteria_error:
 	st.error(criteria_error)
@@ -260,6 +298,10 @@ if submit_evaluation:
 		input_errors.append("Upload at least one supplier PDF before evaluation.")
 	if not criteria or criteria_error:
 		input_errors.append("Evaluation cannot start until active criteria load and total 100%.")
+	if not llm_model.strip():
+		input_errors.append("Enter a model name before starting evaluation.")
+	if llm_provider == "openai-compatible" and not llm_base_url.strip():
+		input_errors.append("Enter the base URL for the OpenAI-compatible provider.")
 	for index, (supplier_name, submission_date, experience_rating) in enumerate(metadata_values):
 		if not supplier_name.strip():
 			input_errors.append(f"Supplier {index + 1}: enter a supplier name.")
@@ -286,12 +328,20 @@ if submit_evaluation:
 		]
 		try:
 			with st.spinner("Extracting proposal text and evaluating suppliers…"):
-				llm_client = create_llm_client()
-				result = run_rfp_evaluation(submissions, llm_client)
+				llm_client = create_llm_client(
+					provider=llm_provider,
+					api_key=llm_api_key.strip() or None,
+					base_url=llm_base_url.strip() or None,
+				)
+				result = run_rfp_evaluation(
+					submissions,
+					llm_client,
+					model=llm_model.strip(),
+				)
 			st.session_state["rfp_evaluation_result"] = result
 			st.success("Evaluation completed and saved.")
 		except RFPOrchestrationError as error:
-			st.error(_safe_message(str(error)))
+			st.error(_safe_message(str(error), (llm_api_key,)))
 		except Exception as error:
 			st.error(
 				"Evaluation could not be completed. Check the configured LLM provider, "

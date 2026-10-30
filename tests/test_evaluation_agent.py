@@ -160,9 +160,27 @@ class EvaluationAgentTests(unittest.TestCase):
             base_url="https://llm.example.test/v1",
         )
 
+    def test_client_factory_accepts_explicit_credentials_and_endpoint(self) -> None:
+        mock_client = Mock()
+        openai_module = types.ModuleType("openai")
+        openai_module.OpenAI = Mock(return_value=mock_client)
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.dict(sys.modules, {"openai": openai_module}):
+                client = create_llm_client(
+                    provider="openai-compatible",
+                    api_key="user-secret",
+                    base_url="https://custom.example/v1",
+                )
+
+        self.assertIs(client, mock_client)
+        openai_module.OpenAI.assert_called_once_with(
+            api_key="user-secret",
+            base_url="https://custom.example/v1",
+        )
+
     def test_client_factory_requires_environment_credential(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
-            with self.assertRaisesRegex(EvaluationError, "Set LLM_API_KEY"):
+            with self.assertRaisesRegex(EvaluationError, "Provide an API key"):
                 create_llm_client()
 
 

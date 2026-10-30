@@ -46,12 +46,18 @@ class LLMClient(Protocol):
 	chat: ChatNamespace
 
 
-def create_llm_client(provider: str | None = None) -> LLMClient:
-	"""Create an OpenAI or OpenAI-compatible client from environment settings.
+def create_llm_client(
+	provider: str | None = None,
+	*,
+	api_key: str | None = None,
+	base_url: str | None = None,
+) -> LLMClient:
+	"""Create an OpenAI or OpenAI-compatible client from explicit or environment settings.
 
 	Set ``LLM_API_KEY`` (or ``OPENAI_API_KEY``), ``LLM_PROVIDER``, and
-	optionally ``LLM_BASE_URL``. Other provider SDKs can be used by passing a
-	compatible client directly to :func:`evaluate_supplier`.
+	optionally ``LLM_BASE_URL``. Explicit arguments take precedence over their
+	environment-variable equivalents. Other provider SDKs can be used by passing
+	a compatible client directly to :func:`evaluate_supplier`.
 	"""
 	selected_provider = (provider or os.getenv("LLM_PROVIDER", "openai")).strip().lower()
 	if selected_provider not in SUPPORTED_PROVIDERS:
@@ -61,11 +67,11 @@ def create_llm_client(provider: str | None = None) -> LLMClient:
 			"or inject a compatible client directly."
 		)
 
-	api_key = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
-	if not api_key:
+	selected_api_key = api_key or os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
+	if not selected_api_key:
 		raise EvaluationError(
-			"Set LLM_API_KEY or OPENAI_API_KEY in the environment before creating "
-			"the LLM client."
+			"Provide an API key or set LLM_API_KEY or OPENAI_API_KEY in the "
+			"environment before creating the LLM client."
 		)
 
 	try:
@@ -76,10 +82,10 @@ def create_llm_client(provider: str | None = None) -> LLMClient:
 			"requirements.txt."
 		) from error
 
-	client_options: dict[str, str] = {"api_key": api_key}
-	base_url = os.getenv("LLM_BASE_URL")
-	if base_url:
-		client_options["base_url"] = base_url
+	client_options: dict[str, str] = {"api_key": selected_api_key}
+	selected_base_url = base_url or os.getenv("LLM_BASE_URL")
+	if selected_base_url:
+		client_options["base_url"] = selected_base_url
 	try:
 		return cast(LLMClient, OpenAI(**client_options))
 	except Exception as error:
@@ -220,5 +226,4 @@ def _get_field(value: object, field_name: str) -> object | None:
 	if isinstance(value, Mapping):
 		return value.get(field_name)
 	return getattr(value, field_name, None)
-
 
